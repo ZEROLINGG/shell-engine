@@ -45,14 +45,14 @@ Anything else — nushell, elvish, xonsh, irb, sqlite3, custom REPLs, etc. — c
 
 ```toml
 [dependencies]
-shell-engine = "0.2.0"
+shell-engine = "0.2"
 ```
 
 PTY support (via `rust-pty` + `vt100`) is enabled by default. To disable it:
 
 ```toml
 [dependencies]
-shell-engine = { version = "0.2.0", default-features = false }
+shell-engine = { version = "0.2", default-features = false }
 ```
 
 ## Usage
