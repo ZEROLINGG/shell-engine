@@ -31,22 +31,15 @@ async fn main() -> anyhow::Result<()> {
 - **Lifecycle control** — `send`, `send_line`, `send_control_char`, `send_keys`, `send_eof`, `reset`, `exit`, `close`, `join_close`, `join_exit`, and auto-close on drop
 - **Control characters** — `send("^C")` auto-detects `^@`–`^_` and `^?` syntax; PTY mode supports full `^A`–`^_` and `^?`, pipe mode supports `^R` (reset) and `^D` (EOF)
 - **Screen snapshot** — PTY mode captures rendered terminal content via `vt100` parser (`output_snapshot`)
-- **Cross-platform** — Unix (bash, zsh, sh, fish, python, node) and Windows (cmd, powershell, pwsh, python, node)
+- **Cross-platform & shell-agnostic** — Built-in defaults for Unix (bash, zsh, sh, fish, python, node) and Windows (cmd, powershell, pwsh, python, node); any other shell or console program works too
 - **Encoding support** — Stateful incremental decoder; auto-detects Windows code page
 - **One-shot execution** — `exec()` for fire-and-forget commands with optional timeout
 
 ## Supported Shells
 
-| Shell | Unix | Windows |
-|-------|------|---------|
-| bash | ✓ | |
-| zsh | ✓ | |
-| sh | ✓ | |
-| fish | ✓ | |
-| cmd | | ✓ |
-| powershell / pwsh | | ✓ |
-| python | ✓ | ✓ |
-| node | ✓ | ✓ |
+Any shell or console program that communicates via standard input/output is supported. The following programs have some built-in defaults (startup parameters, initialization input, exit input): sh, bash, zsh, fish, cmd, PowerShell, pwsh, python, node.
+
+Anything else — nushell, elvish, xonsh, irb, sqlite3, custom REPLs, etc. — can also be spawned: unknown executables are launched with zero arguments and no built-in init/exit input (`exit()` then relies on closing stdin / EOF). Use `args`, `init_input`, `exit_input`, `work_dir`, and `env` on the builder to configure them as needed.
 
 ## Installation
 
@@ -78,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
         .on_output(|line| async move {
             println!("[stdout] {line}");
         })
+
         .on_error(|line| async move {
             eprintln!("[stderr] {line}");
         })
@@ -128,6 +122,37 @@ assert!(result.success());
 // Unwrap stdout on success, or get stderr on failure
 let output: anyhow::Result<String> = result.ok();
 ```
+
+### Process Configuration (work dir / env / args / init & exit input)
+
+These builder methods override the per-shell built-in defaults; overrides survive `reset()`:
+
+```rust
+use shell_engine::Shell;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let mut shell = Shell::new("bash")
+        .work_dir("/tmp")                     // Child process working directory
+        .env("MY_VAR", "42")                  // Extra env vars (layered over parent env)
+        .envs([("A", "1"), ("B", "2")])       // ...or in bulk
+        // .args(["--login", "-i"])           // Override launch args entirely
+        .spawn()
+        .await?;
+
+    shell.send_line("pwd; echo $MY_VAR").await?;
+    let out = shell.output(None, None).await;
+    println!("{}", out.stdout.trim());        // "/tmp" and "42"
+
+    shell.exit().await?;
+    Ok(())
+}
+```
+
+Notes:
+- `init_input(...)` replaces the built-in session-init input (e.g. cmd's `chcp 65001`); it is written to stdin right after spawn and must include its own line terminator (e.g. `"cd /var\n"`).
+- `exit_input(...)` replaces the input sent by `exit()` (e.g. `"quit()\n"` for REPLs); it must also include a line terminator.
+- Unknown shells spawn with zero args and no default init/exit input — `exit()` then relies on closing stdin (EOF).
 
 ### PTY Mode
 
@@ -215,13 +240,15 @@ All key types are re-exported at the crate root: `use shell_engine::{Shell, Shel
 
 **`Shell` lifecycle methods:** `send` (auto-detects `"^C"` syntax; routes to `send_control_char`), `send_line`, `send_keys` (send `Key::SpecialKey`/`Key::Char` sequences, e.g. direction keys, F1–F12), `send_control_char` (PTY: full `^A`–`^_` + `^?`; pipe: `^R` reset, `^D` EOF), `send_eof`, `reset`, `exit`, `close`, `join_close`, `join_exit`
 
-**`Shell` output methods:** `output(idle, max_wait)`, `output_until(pattern, timeout)`
+**`Shell` output methods:** `output(idle, max_wait)`, `output_until(substring, timeout)`
 
 **`Shell` stats:** `output_truncated_bytes`, `error_truncated_bytes` (always 0 in PTY mode)
 
 **`Shell` PTY methods (requires `pty` feature):** `output_snapshot`, `screen_clone`, `resize`, `is_pty`, `pty_window_size`, `send_signal`, `cursor_position`, `move_cursor_to`
 
 **`ShellBuilder` config:** `enable_buffer`, `enable_buffer_with_capacity`, `line_callback`, `raw_callback`
+
+**`ShellBuilder` process config:** `work_dir`, `env`, `envs`, `args`, `init_input`, `exit_input` (override the per-shell built-in defaults; survive `reset()`; unknown shells spawn with zero args)
 
 **`ShellBuilder` PTY config (requires `pty` feature):** `enable_pty`, `pty_size`, `scrollback`, `disable_snapshot` (saves CPU/memory; `output_snapshot`/`screen_clone`/`cursor_position` will error)
 

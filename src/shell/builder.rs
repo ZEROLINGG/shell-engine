@@ -1,6 +1,7 @@
 //! `ShellBuilder`：链式配置 + `spawn()`。
 
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{ensure, Result};
@@ -14,6 +15,7 @@ use crate::shell::callbacks::{
     AsyncCloseCallback, AsyncErrorCallback, AsyncExitCallback, AsyncOutputCallback,
     AsyncPreSendCallback, CallbackHub, CallbackMode, Callbacks, PreSendHook,
 };
+use crate::shell::profile::ShellProfile;
 use crate::shell::Shell;
 
 const DEFAULT_BUFFER_CAPACITY: usize = 4 * 1024 * 1024;
@@ -24,6 +26,13 @@ pub struct ShellBuilder {
     callbacks: Callbacks,
     close_notify: Arc<Notify>,
     buffer_capacity: Option<usize>,
+
+    // 进程级覆盖项：设置后优先于 ShellProfile 的内置默认值
+    args: Option<Vec<String>>,
+    init_input: Option<String>,
+    exit_input: Option<String>,
+    work_dir: Option<PathBuf>,
+    envs: Option<Vec<(String, String)>>,
 
     #[cfg(feature = "pty")]
     pty_opts: Option<PtyOptions>,
@@ -38,9 +47,67 @@ impl ShellBuilder {
             close_notify: Arc::new(Notify::new()),
             buffer_capacity: None,
 
+            args: None,
+            init_input: None,
+            exit_input: None,
+            work_dir: None,
+            envs: None,
+
             #[cfg(feature = "pty")]
             pty_opts: None,
         }
+    }
+
+    // ── 进程配置（profile 覆盖项）──────────────────────────────────────────
+
+    /// 覆盖启动参数。设置后不再使用各 shell 的内置默认参数
+    /// （注意：内置默认会根据 pipe/pty 模式自动切换，覆盖后两种模式使用同一组参数）。
+    pub fn args<I, S>(mut self, args: I) -> Self
+    where
+        S: Into<String>,
+        I: IntoIterator<Item = S>,
+    {
+        self.args = Some(args.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// 覆盖会话建立后立即写入 stdin 的初始化输入。
+    /// 需自带行结束符（如 `"cd /tmp\n"`）。
+    pub fn init_input(mut self, input: impl Into<String>) -> Self {
+        self.init_input = Some(input.into());
+        self
+    }
+
+    /// 覆盖 `exit()` 时发送的退出输入。需自带行结束符；
+    /// 未设置时未知 shell 将只通过关闭 stdin（EOF）退出。
+    pub fn exit_input(mut self, input: impl Into<String>) -> Self {
+        self.exit_input = Some(input.into());
+        self
+    }
+
+    /// 设置子进程的工作目录。
+    pub fn work_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.work_dir = Some(dir.into());
+        self
+    }
+
+    /// 追加一个子进程环境变量（在父进程环境之上叠加）。
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.envs.get_or_insert_with(Vec::new).push((key.into(), value.into()));
+        self
+    }
+
+    /// 批量追加子进程环境变量（在父进程环境之上叠加）。
+    pub fn envs<I, K, V>(mut self, envs: I) -> Self
+    where
+        K: Into<String>,
+        V: Into<String>,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        self.envs
+            .get_or_insert_with(Vec::new)
+            .extend(envs.into_iter().map(|(k, v)| (k.into(), v.into())));
+        self
     }
 
     // ── PTY 配置 ──────────────────────────────────────────────────────────
@@ -175,6 +242,24 @@ impl ShellBuilder {
         let shell_path = self.shell_path.trim().to_string();
         ensure!(!shell_path.is_empty(), "shell path cannot be empty");
 
+        // 唯一的 profile 构造点：名称归一化失败在此统一报错
+        let mut profile = ShellProfile::new(shell_path)?;
+        if let Some(args) = self.args {
+            profile.set_args(args);
+        }
+        if let Some(input) = self.init_input {
+            profile.set_init_input(input);
+        }
+        if let Some(input) = self.exit_input {
+            profile.set_exit_input(input);
+        }
+        if let Some(dir) = self.work_dir {
+            profile.set_work_dir(dir);
+        }
+        if let Some(envs) = self.envs {
+            profile.set_env(envs);
+        }
+
         let pre_send = PreSendHook::new(self.pre_send);
         let callbacks = CallbackHub::new(self.callbacks);
         let output_buffer = self
@@ -195,7 +280,7 @@ impl ShellBuilder {
         };
 
         let cfg = LaunchConfig {
-            shell_path,
+            profile,
             callbacks,
             output_buffer,
             error_buffer,

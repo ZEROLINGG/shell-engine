@@ -2,11 +2,7 @@
 
 pub mod exec;
 pub mod shell;
-pub mod util;
-
-#[cfg(feature = "pty")]
-mod pty;
-mod pipe;
+pub mod tool;
 
 pub use shell::{CallbackMode, OutputBuffer, Shell, ShellBuilder, ShellOutput};
 

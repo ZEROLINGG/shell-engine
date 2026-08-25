@@ -78,7 +78,8 @@ impl PtyState {
 
 /// 启动一个会话所需的全部配置。
 pub(crate) struct LaunchConfig {
-    pub shell_path: String,
+    /// 会话配置（shell 路径 / 启动参数 / 环境变量 / 工作目录等覆盖项）。
+    pub profile: ShellProfile,
     pub callbacks: CallbackHub,
     pub output_buffer: Option<Arc<OutputBuffer>>,
     pub error_buffer: Option<Arc<OutputBuffer>>,
@@ -97,13 +98,10 @@ pub(crate) struct SpawnedSession {
 
 /// 唯一的会话启动入口。
 pub(crate) async fn launch(cfg: LaunchConfig) -> Result<SpawnedSession> {
-    let profile = ShellProfile::detect(&cfg.shell_path)?;
-
     #[cfg(feature = "pty")]
     if let Some(opts) = cfg.pty_opts {
-        let result = crate::pty::spawn_pty_process(
-            &cfg.shell_path,
-            &profile,
+        let result = crate::shell::pty::spawn_pty_process(
+            &cfg.profile,
             opts.cols,
             opts.rows,
             opts.scrollback,
@@ -128,9 +126,8 @@ pub(crate) async fn launch(cfg: LaunchConfig) -> Result<SpawnedSession> {
         });
     }
 
-    let (tx_stdin, drop_tx, join) = crate::pipe::spawn_process(
-        &cfg.shell_path,
-        &profile,
+    let (tx_stdin, drop_tx, join) = crate::shell::pipe::spawn_process(
+        &cfg.profile,
         cfg.callbacks,
         cfg.output_buffer,
         cfg.error_buffer,

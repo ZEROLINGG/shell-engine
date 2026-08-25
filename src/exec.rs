@@ -4,7 +4,7 @@ use std::process::Stdio;
 use anyhow::{anyhow, bail, ensure, Result};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use crate::util::{decode_bytes, normalize_shell_name};
+use crate::tool::{decode_bytes, normalize_shell_name};
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;

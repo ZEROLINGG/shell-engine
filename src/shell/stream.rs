@@ -10,7 +10,7 @@ use tokio::time::MissedTickBehavior;
 
 use crate::shell::buffer::OutputBuffer;
 use crate::shell::callbacks::{CallbackHub, CallbackMode};
-use crate::util::StreamDecoder;
+use crate::tool::StreamDecoder;
 
 /// 每次 `read()` 的块大小。
 pub(crate) const READ_CHUNK_SIZE: usize = 8192;

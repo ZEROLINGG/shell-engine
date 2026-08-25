@@ -6,6 +6,9 @@ mod builder;
 pub(crate) mod callbacks;
 pub(crate) mod profile;
 pub(crate) mod stream;
+mod pipe;
+#[cfg(feature = "pty")]
+mod pty;
 
 pub use buffer::OutputBuffer;
 pub use builder::ShellBuilder;
@@ -15,8 +18,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, ensure};
-use tokio::sync::{Mutex, Notify, OnceCell, mpsc, oneshot};
+use anyhow::{anyhow, ensure, Result};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify, OnceCell};
 use tokio::task::JoinHandle;
 
 use crate::shell::backend::LaunchConfig;
@@ -191,6 +194,9 @@ impl ShellOutput {
 
 pub struct Shell {
     pub shell_path: String,
+    /// 会话配置（含启动参数/环境变量/工作目录等覆盖项），
+    /// 由 Builder 在 spawn 时构造，`reset()` / `exit()` 复用。
+    profile: ShellProfile,
     tx_stdin: mpsc::Sender<StdinMsg>,
     drop_tx: Option<oneshot::Sender<()>>,
     pre_send: PreSendHook,
@@ -218,7 +224,8 @@ impl Shell {
         close_notify: Arc<Notify>,
     ) -> Result<Shell> {
         // launch() 会消耗掉 cfg 里的字段，这里先拷贝出后续要长期持有的部分。
-        let shell_path = cfg.shell_path.clone();
+        let shell_path = cfg.profile.get_path().to_string();
+        let profile = cfg.profile.clone();
         let callbacks = cfg.callbacks.clone();
         let output_buffer = cfg.output_buffer.clone();
         let error_buffer = cfg.error_buffer.clone();
@@ -227,6 +234,7 @@ impl Shell {
 
         Ok(Shell {
             shell_path,
+            profile,
             tx_stdin: session.tx_stdin,
             drop_tx: Some(session.drop_tx),
             pre_send,
@@ -335,11 +343,11 @@ impl Shell {
         ShellOutput { stdout, stderr }
     }
 
-    /// 持续等待，直到 stdout 或 stderr 中出现指定的子串 `pattern`，
+    /// 持续等待，直到 stdout 或 stderr 中出现指定的子串 `substring`，
     /// 或等待超过 `timeout`，然后返回期间累积到的全部输出并清空缓冲区。
     pub async fn output_until(
         &mut self,
-        pattern: String,
+        substring: String,
         timeout: Option<Duration>,
     ) -> ShellOutput {
         let ob_out = self.output_buffer.as_ref();
@@ -367,7 +375,7 @@ impl Shell {
                 }
             }
 
-            if stdout_acc.contains(&pattern) || stderr_acc.contains(&pattern) {
+            if stdout_acc.contains(&substring) || stderr_acc.contains(&substring) {
                 break;
             }
 
@@ -682,7 +690,7 @@ impl Shell {
         }
 
         let cfg = LaunchConfig {
-            shell_path: self.shell_path.clone(),
+            profile: self.profile.clone(),
             callbacks: self.callbacks.clone(),
             output_buffer: self.output_buffer.clone(),
             error_buffer: self.error_buffer.clone(),
@@ -707,11 +715,10 @@ impl Shell {
     pub async fn exit(&mut self) -> Result<()> {
         ensure!(!self.droped, "shell is closed");
 
-        let exit_cmd = ShellProfile::detect(&self.shell_path)
-            .map(|p| p.exit_command())
-            .unwrap_or_else(|_| "exit\n".to_string());
-
-        let _ = self.tx_stdin.send(StdinMsg::Data(exit_cmd)).await;
+        // 自定义/未知的退出输入由 profile 决定；为 None 时仅靠关闭 stdin（EOF）退出
+        if let Some(exit_cmd) = self.profile.get_exit_input() {
+            let _ = self.tx_stdin.send(StdinMsg::Data(exit_cmd)).await;
+        }
         let _ = self.tx_stdin.send(StdinMsg::Close).await;
 
         const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -774,7 +781,7 @@ fn parse_control_shortcut(cmd: &str) -> Option<char> {
 mod tests {
     use super::*;
     use tokio::sync::mpsc as test_mpsc;
-    use tokio::time::{Duration, timeout};
+    use tokio::time::{timeout, Duration};
 
     #[test]
     fn control_shortcut_parsing() {
@@ -868,6 +875,64 @@ mod tests {
         shell.send_line("echo $EXPORTED_VAR").await.unwrap();
         let out2 = shell.output(Some(Duration::from_millis(200)), None).await;
         assert!(!out2.stdout.contains("12345"));
+
+        shell.exit().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn work_dir_and_env_take_effect() {
+        let mut shell = Shell::new("sh")
+            .enable_buffer()
+            .work_dir("/tmp")
+            .env("SHELL_ENGINE_X", "42")
+            .spawn()
+            .await
+            .unwrap();
+
+        shell.send_line("pwd; echo X=$SHELL_ENGINE_X").await.unwrap();
+        let out = shell.output(Some(Duration::from_millis(300)), None).await;
+        assert!(out.stdout.contains("/tmp"));
+        assert!(out.stdout.contains("X=42"));
+
+        shell.exit().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn reset_preserves_profile_overrides() {
+        let mut shell = Shell::new("sh")
+            .enable_buffer()
+            .work_dir("/tmp")
+            .env("SHELL_ENGINE_Y", "keep")
+            .spawn()
+            .await
+            .unwrap();
+
+        shell.reset().await.expect("reset failed");
+
+        shell.send_line("pwd; echo Y=$SHELL_ENGINE_Y").await.unwrap();
+        let out = shell.output(Some(Duration::from_millis(300)), None).await;
+        assert!(out.stdout.contains("/tmp"));
+        assert!(out.stdout.contains("Y=keep"));
+
+        shell.exit().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg(all(unix, feature = "pty"))]
+    async fn pty_work_dir_takes_effect() {
+        let mut shell = Shell::new("sh")
+            .enable_pty()
+            .enable_buffer()
+            .work_dir("/tmp")
+            .spawn()
+            .await
+            .unwrap();
+
+        shell.send_line("pwd").await.unwrap();
+        let out = shell.output(Some(Duration::from_millis(300)), None).await;
+        assert!(out.stdout.contains("/tmp"));
 
         shell.exit().await.unwrap();
     }

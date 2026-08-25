@@ -21,14 +21,26 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// 启动管道模式子进程，返回驱动交互所需的句柄。
 pub(crate) async fn spawn_process(
-    shell_path: &str,
     profile: &ShellProfile,
     callbacks: CallbackHub,
     output_buffer: Option<Arc<OutputBuffer>>,
     error_buffer: Option<Arc<OutputBuffer>>,
 ) -> Result<(mpsc::Sender<StdinMsg>, oneshot::Sender<()>, JoinHandle<()>)> {
-    let mut cmd = Command::new(shell_path);
-    cmd.args(profile.args(false)?);
+    let mut cmd = Command::new(profile.get_path());
+
+    // 未知 shell 允许零参数启动（get_args 返回 None）
+    if let Some(args) = profile.get_args(false) {
+        cmd.args(args);
+    }
+    if let Some(dir) = profile.get_work_dir() {
+        cmd.current_dir(dir);
+    }
+    if let Some(envs) = profile.get_env() {
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+    }
+
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -45,7 +57,7 @@ pub(crate) async fn spawn_process(
     let (tx_stdin, mut rx_stdin) = mpsc::channel::<StdinMsg>(32);
     let (drop_tx, drop_rx) = oneshot::channel::<()>();
 
-    if let Some(init) = profile.init_command() {
+    if let Some(init) = profile.get_init_input() {
         stdin.write_all(init.as_bytes()).await?;
         stdin.flush().await?;
     }

@@ -23,7 +23,6 @@ pub(crate) struct PtySpawnResult {
 
 /// 启动一个 PTY 会话，返回给 `Shell` 用于驱动交互的各种句柄。
 pub(crate) async fn spawn_pty_process(
-    shell_path: &str,
     profile: &ShellProfile,
     cols: u16,
     rows: u16,
@@ -32,12 +31,23 @@ pub(crate) async fn spawn_pty_process(
     callbacks: CallbackHub,
     output_buffer: Option<Arc<OutputBuffer>>,
 ) -> Result<PtySpawnResult> {
-    let args = profile.args(true)?;
-    let config = PtyConfig::builder().window_size(cols, rows).build();
+    // 未知 shell 允许零参数启动（get_args 返回 None）
+    let args = profile.get_args(true).unwrap_or_default();
 
-    let (mut master, child) = NativePtySystem::spawn(shell_path, args, &config).await?;
+    let mut builder = PtyConfig::builder().window_size(cols, rows);
+    if let Some(dir) = profile.get_work_dir() {
+        builder = builder.working_directory(dir);
+    }
+    if let Some(envs) = profile.get_env() {
+        for (k, v) in envs {
+            builder = builder.env(k, v);
+        }
+    }
+    let config = builder.build();
 
-    if let Some(init) = profile.init_command() {
+    let (mut master, child) = NativePtySystem::spawn(profile.get_path(), args, &config).await?;
+
+    if let Some(init) = profile.get_init_input() {
         master.write_all(init.as_bytes()).await?;
         master.flush().await?;
     }
