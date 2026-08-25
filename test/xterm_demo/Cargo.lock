@@ -526,9 +526,9 @@ dependencies = [
 
 [[package]]
 name = "rust-pty"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0ad83265221314013dbe602194ecfd2d17c571c482cd38bc0675c6deb752149"
+checksum = "1e5d9695b36a3dd86e29776a05afe62fd43c5a2c2bcb44da097086630a3b7f38"
 dependencies = [
  "libc",
  "rustix",
@@ -643,7 +643,7 @@ dependencies = [
 
 [[package]]
 name = "shell-engine"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "codepage",

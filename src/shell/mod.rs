@@ -779,6 +779,7 @@ fn parse_control_shortcut(cmd: &str) -> Option<char> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(unused)]
     use super::*;
     use tokio::sync::mpsc as test_mpsc;
     use tokio::time::{timeout, Duration};
