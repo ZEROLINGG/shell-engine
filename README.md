@@ -66,7 +66,7 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut shell = Shell::new("bash")
-        .enable_buffer()              // Buffer stdout/stderr (default 4 MiB)
+        .enable_buffer()              // Buffer stdout/stderr (default 1 MiB)
         .line_callback()              // Complete lines; partial flushed after 80 ms idle
         .on_output(|line| async move {
             println!("[stdout] {line}");

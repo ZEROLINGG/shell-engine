@@ -18,7 +18,7 @@ use crate::shell::callbacks::{
 use crate::shell::profile::ShellProfile;
 use crate::shell::Shell;
 
-const DEFAULT_BUFFER_CAPACITY: usize = 4 * 1024 * 1024;
+const DEFAULT_BUFFER_CAPACITY: usize = 1024 * 1024;
 
 pub struct ShellBuilder {
     shell_path: String,
@@ -157,7 +157,7 @@ impl ShellBuilder {
 
     // ── 缓冲区 ────────────────────────────────────────────────────────────
 
-    /// 启用输出缓冲，使用默认容量（4 MB）。
+    /// 启用输出缓冲，使用默认容量（1 MB）。
     pub fn enable_buffer(mut self) -> Self {
         self.buffer_capacity = Some(DEFAULT_BUFFER_CAPACITY);
         self
