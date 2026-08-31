@@ -108,10 +108,10 @@ impl ShellProfile {
             return Some(init_input.clone());
         }
         match self.name.as_str() {
-            "cmd" => Some("chcp 65001 >nul 2>&1\r\n".into()),
+            "cmd" => Some("chcp 65001 >nul 2>&1\n".into()),
             "powershell" | "pwsh" => Some("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;\
-            [Console]::InputEncoding  = [System.Text.Encoding]::UTF8;\
-            $OutputEncoding           = [System.Text.Encoding]::UTF8".into()),
+            [Console]::InputEncoding = [System.Text.Encoding]::UTF8;\
+            $OutputEncoding = [System.Text.Encoding]::UTF8;\n".into()),
             _ => None,
         }
     }
