@@ -7,10 +7,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 
+use crate::shell::OutputBuffer;
 use crate::shell::callbacks::{CallbackHub, CallbackMode};
 use crate::shell::profile::ShellProfile;
-use crate::shell::stream::{OutputPump, StdinMsg, LINE_MODE_FLUSH_IDLE, READ_CHUNK_SIZE};
-use crate::shell::OutputBuffer;
+use crate::shell::stream::{LINE_MODE_FLUSH_IDLE, OutputPump, READ_CHUNK_SIZE, StdinMsg};
 
 /// `spawn_pty_process` 的返回值集合。
 pub(crate) struct PtySpawnResult {
@@ -112,20 +112,20 @@ async fn run_pty_io<M>(
                 match res {
                     Ok(0) | Err(_) => {
                         let text = pump.decode_eof();
-                        if let Some(vt) = &vt {
-                            if let Ok(mut p) = vt.lock() {
-                                p.process(text.as_bytes());
-                            }
+                        if let Some(vt) = &vt
+                            && let Ok(mut p) = vt.lock()
+                        {
+                            p.process(text.as_bytes());
                         }
                         pump.finish(&ob, &callbacks, false).await;
                         break;
                     }
                     Ok(n) => {
                         let text = pump.decode(&raw[..n]);
-                        if let Some(vt) = &vt {
-                            if let Ok(mut p) = vt.lock() {
-                                p.process(text.as_bytes());
-                            }
+                        if let Some(vt) = &vt
+                            && let Ok(mut p) = vt.lock()
+                        {
+                            p.process(text.as_bytes());
                         }
                         pump.dispatch(&ob, &callbacks, false).await;
                     }
@@ -149,11 +149,11 @@ async fn run_pty_io<M>(
                     }
                     Some(StdinMsg::Resize(cols, rows)) => {
                         let _ = master.resize(WindowSize::new(cols, rows));
-                        if let Some(vt) = &vt {
-                            if let Ok(mut p) = vt.lock() {
-                                // set_size 定义在 Screen 上，需通过 screen_mut() 调用
-                                p.screen_mut().set_size(rows, cols);
-                            }
+                        if let Some(vt) = &vt
+                            && let Ok(mut p) = vt.lock()
+                        {
+                            // set_size 定义在 Screen 上，需通过 screen_mut() 调用
+                            p.screen_mut().set_size(rows, cols);
                         }
                     }
                 }

@@ -2,8 +2,8 @@
 //! （启动参数 / 初始化命令 / 退出命令）集中到一处，避免这三件事
 //! 分散在三个不同的 `match` 语句里，新增一种 shell 支持时容易漏改。
 
-use std::path::PathBuf;
 use anyhow::Result;
+use std::path::PathBuf;
 
 use crate::tool::normalize_shell_name;
 
@@ -35,31 +35,43 @@ impl ShellProfile {
         S: Into<String>,
         I: IntoIterator<Item = (S, S)>,
     {
-        self.env = Some(envs
-            .into_iter()
-            .map(|(k, v)| (k.into(), v.into()))
-            .collect());
+        self.env = Some(
+            envs.into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        );
     }
     pub fn set_args<S, I>(&mut self, args: I)
     where
         S: Into<String>,
         I: IntoIterator<Item = S>,
     {
-        self.args = Some(args
-            .into_iter()
-            .map(|arg| arg.into())
-            .collect());
+        self.args = Some(args.into_iter().map(|arg| arg.into()).collect());
     }
 
-    pub fn set_init_input<S: Into<String>>(&mut self, init_input: S) { self.init_input = Some(init_input.into()); }
-    pub fn set_exit_input<S: Into<String>>(&mut self, exit_input: S) { self.exit_input = Some(exit_input.into()); }
-    pub fn set_work_dir<P: Into<PathBuf>>(&mut self, work_dir: P) { self.work_dir = Some(work_dir.into()); }
+    pub fn set_init_input<S: Into<String>>(&mut self, init_input: S) {
+        self.init_input = Some(init_input.into());
+    }
+    pub fn set_exit_input<S: Into<String>>(&mut self, exit_input: S) {
+        self.exit_input = Some(exit_input.into());
+    }
+    pub fn set_work_dir<P: Into<PathBuf>>(&mut self, work_dir: P) {
+        self.work_dir = Some(work_dir.into());
+    }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn get_name(&self) -> &str { &self.name }
-    pub fn get_path(&self) -> &str { &self.path }
-    pub fn get_work_dir(&self) -> Option<&std::path::Path> { self.work_dir.as_deref() }
-    pub fn get_env(&self) -> Option<&[(String, String)]> { self.env.as_deref() }
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+    pub fn get_path(&self) -> &str {
+        &self.path
+    }
+    pub fn get_work_dir(&self) -> Option<&std::path::Path> {
+        self.work_dir.as_deref()
+    }
+    pub fn get_env(&self) -> Option<&[(String, String)]> {
+        self.env.as_deref()
+    }
 
     /// 获取启动参数；如果用户已经通过 `set_args` 设置，则优先返回用户设置的值。
     /// 否则根据 `self.name` 提供各 shell 的默认参数（会考虑 pty_mode）。
@@ -109,9 +121,12 @@ impl ShellProfile {
         }
         match self.name.as_str() {
             "cmd" => Some("chcp 65001 >nul 2>&1\n".into()),
-            "powershell" | "pwsh" => Some("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;\
+            "powershell" | "pwsh" => Some(
+                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;\
             [Console]::InputEncoding = [System.Text.Encoding]::UTF8;\
-            $OutputEncoding = [System.Text.Encoding]::UTF8;\n".into()),
+            $OutputEncoding = [System.Text.Encoding]::UTF8;\n"
+                    .into(),
+            ),
             _ => None,
         }
     }
@@ -127,7 +142,6 @@ impl ShellProfile {
             _ => None,
         }
     }
-
 }
 
 #[cfg(test)]
@@ -137,8 +151,14 @@ mod tests {
     #[test]
     fn bash_args_differ_between_pipe_and_pty() {
         let p = ShellProfile::new("/bin/bash".into()).unwrap();
-        assert_eq!(p.get_args(false), Some(vec!["--norc".into(), "--noprofile".into(), "-s".into()]));
-        assert_eq!(p.get_args(true), Some(vec!["--norc".into(), "--noprofile".into(), "-i".into()]));
+        assert_eq!(
+            p.get_args(false),
+            Some(vec!["--norc".into(), "--noprofile".into(), "-s".into()])
+        );
+        assert_eq!(
+            p.get_args(true),
+            Some(vec!["--norc".into(), "--noprofile".into(), "-i".into()])
+        );
     }
 
     #[test]
@@ -183,7 +203,10 @@ mod tests {
 
         p.set_env([("FOO", "bar"), ("A", "B")]);
         p.set_work_dir("/tmp");
-        assert_eq!(p.get_env(), Some(&[("FOO".into(), "bar".into()), ("A".into(), "B".into())][..]));
+        assert_eq!(
+            p.get_env(),
+            Some(&[("FOO".into(), "bar".into()), ("A".into(), "B".into())][..])
+        );
         assert_eq!(p.get_work_dir(), Some(std::path::Path::new("/tmp")));
     }
 }

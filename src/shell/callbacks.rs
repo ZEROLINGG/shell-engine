@@ -13,15 +13,14 @@ use tokio::sync::Mutex;
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub(crate) type AsyncPreSendCallback =
-Box<dyn FnMut(String) -> BoxFuture<'static, Option<String>> + Send + 'static>;
+    Box<dyn FnMut(String) -> BoxFuture<'static, Option<String>> + Send + 'static>;
 pub(crate) type AsyncOutputCallback =
-Box<dyn FnMut(String) -> BoxFuture<'static, ()> + Send + 'static>;
+    Box<dyn FnMut(String) -> BoxFuture<'static, ()> + Send + 'static>;
 pub(crate) type AsyncErrorCallback =
-Box<dyn FnMut(String) -> BoxFuture<'static, ()> + Send + 'static>;
+    Box<dyn FnMut(String) -> BoxFuture<'static, ()> + Send + 'static>;
 pub(crate) type AsyncExitCallback =
-Box<dyn FnMut(Option<i32>) -> BoxFuture<'static, ()> + Send + 'static>;
-pub(crate) type AsyncCloseCallback =
-Box<dyn FnMut() -> BoxFuture<'static, ()> + Send + 'static>;
+    Box<dyn FnMut(Option<i32>) -> BoxFuture<'static, ()> + Send + 'static>;
+pub(crate) type AsyncCloseCallback = Box<dyn FnMut() -> BoxFuture<'static, ()> + Send + 'static>;
 
 /// 输出回调触发粒度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

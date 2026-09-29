@@ -109,7 +109,7 @@ pub(crate) async fn launch(cfg: LaunchConfig) -> Result<SpawnedSession> {
             cfg.callbacks,
             cfg.output_buffer,
         )
-            .await?;
+        .await?;
 
         return Ok(SpawnedSession {
             tx_stdin: result.tx_stdin,
@@ -132,7 +132,7 @@ pub(crate) async fn launch(cfg: LaunchConfig) -> Result<SpawnedSession> {
         cfg.output_buffer,
         cfg.error_buffer,
     )
-        .await?;
+    .await?;
 
     Ok(SpawnedSession {
         tx_stdin,

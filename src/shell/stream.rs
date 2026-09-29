@@ -1,7 +1,3 @@
-//! `OutputPump`：统一封装"解码 + 按模式分派（Raw 立即输出 / Line 按行 flush）"
-//! 的状态机。管道模式（`read_stream`）与 PTY 模式（`pty::run_pty_io`）
-//! 共用同一套实现，避免出现两份容易行为漂移的读取逻辑。
-
 use std::sync::Arc;
 use std::time::Duration;
 

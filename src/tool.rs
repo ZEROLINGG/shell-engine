@@ -3,6 +3,11 @@ use anyhow::{Result, anyhow};
 use encoding_rs::{CoderResult, Decoder, Encoding, UTF_8};
 use std::path::Path;
 
+/// 从 shell 路径中提取规范化名称（小写、去掉数字/点号后缀，如 `python3.11` → `python`）。
+///
+/// # Errors
+///
+/// 当路径不含有效的文件名部分（如 `/`、空串）时返回 `Err`。
 pub fn normalize_shell_name(shell: &str) -> Result<String> {
     let mut name = Path::new(shell)
         .file_name()
@@ -110,7 +115,7 @@ impl Default for StreamDecoder {
     }
 }
 
-
+/// 移除文本中的 ANSI 转义序列（颜色、光标控制等），只保留可见字符。
 pub fn strip_ansi_codes(text: &str) -> String {
     strip_ansi_escapes::strip_str(text)
 }

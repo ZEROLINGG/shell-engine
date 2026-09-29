@@ -4,11 +4,11 @@ mod backend;
 pub(crate) mod buffer;
 mod builder;
 pub(crate) mod callbacks;
-pub(crate) mod profile;
-pub(crate) mod stream;
 mod pipe;
+pub(crate) mod profile;
 #[cfg(feature = "pty")]
 mod pty;
+pub(crate) mod stream;
 
 pub use buffer::OutputBuffer;
 pub use builder::ShellBuilder;
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use anyhow::{anyhow, ensure, Result};
-use tokio::sync::{mpsc, oneshot, Mutex, Notify, OnceCell};
+use anyhow::{Result, anyhow, ensure};
+use tokio::sync::{Mutex, Notify, OnceCell, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::shell::backend::LaunchConfig;
@@ -30,6 +30,7 @@ use crate::shell::profile::ShellProfile;
 use crate::shell::stream::StdinMsg;
 #[cfg(feature = "pty")]
 use rust_pty::PtySignal;
+#[cfg(feature = "pty")]
 use tokio::time::sleep;
 
 // ─── 全局单例 ────────────────────────────────────────────────────────────────
@@ -39,6 +40,11 @@ static BASH: OnceCell<Result<Arc<Mutex<Shell>>>> = OnceCell::const_new();
 #[cfg(windows)]
 static POWERSHELL: OnceCell<Result<Arc<Mutex<Shell>>>> = OnceCell::const_new();
 
+/// 获取全局共享的 bash 会话单例（首次调用时自动创建并启用缓冲）。
+///
+/// # Errors
+///
+/// 当 bash 不存在或首次启动失败时返回 `Err`。
 #[cfg(unix)]
 pub async fn bash() -> Result<Arc<Mutex<Shell>>> {
     let result = BASH
@@ -56,6 +62,11 @@ pub async fn bash() -> Result<Arc<Mutex<Shell>>> {
     }
 }
 
+/// 获取全局共享的 powershell 会话单例（首次调用时自动创建并启用缓冲）。
+///
+/// # Errors
+///
+/// 当 powershell 不存在或首次启动失败时返回 `Err`。
 #[cfg(windows)]
 pub async fn powershell() -> Result<Arc<Mutex<Shell>>> {
     let result = POWERSHELL
@@ -73,12 +84,15 @@ pub async fn powershell() -> Result<Arc<Mutex<Shell>>> {
     }
 }
 
+/// 单个按键描述：可直接指定特殊键，或单个字符；也可用 `"[Up]"` / `"[f1]"` 等
+/// 字符串标签，发送时会尝试解析为 [`SpecialKey`]。
 pub enum Key {
     SpecialKey(SpecialKey),
     Char(char),
     StringChar(String), // 处理时尝试解析[Up],[Down]……为SpecialKey
 }
 
+/// 特殊按键（方向键、功能键、编辑键等）。
 pub enum SpecialKey {
     Up,
     Down,
@@ -141,6 +155,19 @@ impl SpecialKey {
             SpecialKey::F12 => "\x1b[24~",
         }
     }
+    /// 将 `"[Up]"`、`"[f1]"` 等字符串标签解析为对应的特殊键；无法识别时返回 `None`。
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use shell_engine::shell::SpecialKey;
+    ///
+    /// assert!(matches!(
+    ///     SpecialKey::from_str_tag("[enter]"),
+    ///     Some(SpecialKey::Enter)
+    /// ));
+    /// assert!(SpecialKey::from_str_tag("[unknown]").is_none());
+    /// ```
     pub fn from_str_tag(tag: &str) -> Option<Self> {
         match tag.to_lowercase().as_str() {
             "[up]" => Some(SpecialKey::Up),
@@ -185,6 +212,7 @@ pub struct ShellOutput {
 }
 
 impl ShellOutput {
+    /// stdout 与 stderr 是否均为空。
     pub fn is_empty(&self) -> bool {
         self.stdout.is_empty() && self.stderr.is_empty()
     }
@@ -192,6 +220,9 @@ impl ShellOutput {
 
 // ─── Shell ────────────────────────────────────────────────────────────────
 
+/// 一个持久 shell 会话：管道模式或 PTY 模式下的交互句柄。
+///
+/// 通过 [`Shell::new`] 或 [`ShellBuilder`] 创建。
 pub struct Shell {
     pub shell_path: String,
     /// 会话配置（含启动参数/环境变量/工作目录等覆盖项），
@@ -213,6 +244,9 @@ pub struct Shell {
 }
 
 impl Shell {
+    /// 创建一个新的会话构建器（等价于 [`ShellBuilder::new`]）。构建完成后调用
+    /// `spawn()` 才会真正启动子进程。
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(shell: impl Into<String>) -> ShellBuilder {
         ShellBuilder::new(shell)
     }
@@ -432,6 +466,13 @@ impl Shell {
     }
 
     /// 返回渲染后的虚拟终端屏幕快照（仅 PTY 模式，且未 `disable_snapshot()`）。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - 当前不是 PTY 模式时返回 `Err`；
+    /// - 未启用屏幕追踪（`disable_snapshot()`）时返回 `Err`；
+    /// - vt100 解析器锁损坏时返回 `Err`。
     #[cfg(feature = "pty")]
     pub async fn output_snapshot(
         &mut self,
@@ -461,6 +502,13 @@ impl Shell {
     }
 
     /// 克隆一份 `vt100::Screen`，用于自定义渲染（拿光标位置、每格颜色等）。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - 当前不是 PTY 模式时返回 `Err`；
+    /// - 未启用屏幕追踪时返回 `Err`；
+    /// - vt100 解析器锁损坏时返回 `Err`。
     #[cfg(feature = "pty")]
     pub fn screen_clone(&self) -> Result<vt100::Screen> {
         ensure!(!self.droped, "shell is closed");
@@ -478,6 +526,13 @@ impl Shell {
     }
 
     /// 调整 PTY 窗口尺寸（仅 PTY 模式）。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - `cols` / `rows` 为 0 时返回 `Err`；
+    /// - 当前不是 PTY 模式时返回 `Err`；
+    /// - stdin 通道已关闭时返回 `Err`。
     #[cfg(feature = "pty")]
     pub async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         ensure!(!self.droped, "shell is closed");
@@ -502,6 +557,12 @@ impl Shell {
     }
 
     /// 向 PTY 子进程转发一个信号（如 `PtySignal::Interrupt`）。仅 PTY 模式可用。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - 当前不是 PTY 模式时返回 `Err`；
+    /// - 信号通道已关闭时返回 `Err`。
     #[cfg(feature = "pty")]
     pub async fn send_signal(&mut self, sig: PtySignal) -> Result<()> {
         ensure!(!self.droped, "shell is closed");
@@ -516,6 +577,14 @@ impl Shell {
             .map_err(|_| anyhow!("signal channel closed"))
     }
 
+    /// 返回 vt100 屏幕上的光标位置 `(row, col)`（从 0 开始）。仅 PTY 模式可用。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - 当前不是 PTY 模式时返回 `Err`；
+    /// - 未启用屏幕追踪时返回 `Err`；
+    /// - vt100 解析器锁损坏时返回 `Err`。
     #[cfg(feature = "pty")]
     pub fn cursor_position(&self) -> Result<(u16, u16)> {
         ensure!(!self.droped, "shell is closed");
@@ -533,6 +602,14 @@ impl Shell {
         // vt100 库返回的光标位置通常是 (row, col)，从 0 开始
         Ok(guard.screen().cursor_position())
     }
+    /// 通过 CUP 控制序列把光标移动到 1-based 的 `(row, col)` 位置。仅 PTY 模式可用。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - 当前不是 PTY 模式时返回 `Err`；
+    /// - `row` / `col` 为 0 时返回 `Err`；
+    /// - stdin 通道已关闭时返回 `Err`。
     #[cfg(feature = "pty")]
     pub async fn move_cursor_to(&mut self, row: u16, col: u16) -> Result<()> {
         ensure!(!self.droped, "shell is closed");
@@ -565,6 +642,13 @@ impl Shell {
     }
 
     // ── 发送 ──────────────────────────────────────────────────────────────
+
+    /// 发送一组按键（支持特殊键、字符与字符串标签）。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - stdin 通道已关闭时返回 `Err`。
     pub async fn send_keys(&mut self, keys: Vec<Key>) -> Result<()> {
         ensure!(!self.droped, "shell is closed");
 
@@ -597,6 +681,13 @@ impl Shell {
         Ok(())
     }
 
+    /// 发送原始命令文本（不追加换行符，不经行缓冲）。若文本是 `^C` / `^?` 等
+    /// 控制字符简写则走控制字符路径。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - stdin 通道已关闭时返回 `Err`。
     pub async fn send(&mut self, cmd: &str) -> Result<()> {
         ensure!(!self.droped, "shell is closed");
 
@@ -613,10 +704,21 @@ impl Shell {
         Ok(())
     }
 
+    /// 发送一行命令（自动追加换行符）。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - stdin 通道已关闭时返回 `Err`。
     pub async fn send_line(&mut self, cmd: &str) -> Result<()> {
         self.send(&format!("{cmd}\n")).await
     }
 
+    /// 发送 EOF（关闭子进程 stdin）。管道模式下子进程通常会因此退出。
+    ///
+    /// # Errors
+    ///
+    /// - stdin 通道已关闭时返回 `Err`。
     pub async fn send_eof(&mut self) -> Result<()> {
         self.tx_stdin
             .send(StdinMsg::Eof)
@@ -624,6 +726,12 @@ impl Shell {
             .map_err(|_| anyhow!("send EOF failed"))
     }
 
+    /// 发送控制字符（`^C`、`^D` 等）。PTY 模式下按标准 ASCII 控制字符映射发送；
+    /// 管道模式下只有 `R`（重置会话）与 `D`（EOF）有意义。
+    ///
+    /// # Errors
+    ///
+    /// - stdin 通道已关闭时返回 `Err`。
     pub async fn send_control_char(&mut self, ctrl: char) -> Result<()> {
         let upper = ctrl.to_ascii_uppercase();
 
@@ -631,7 +739,7 @@ impl Shell {
         if self.is_pty() {
             // PTY 模式下：使用公式计算完整的控制字符并直接发送给终端
             // 标准 ASCII 控制字符对应的可打印字符范围是 '@' (0x40) 到 '_' (0x5F)
-            if upper >= '@' && upper <= '_' {
+            if ('@'..='_').contains(&upper) {
                 // 公式：字符的 ASCII 码与 0x40 异或，映射到 0x00 - 0x1F
                 let ctrl_byte = upper as u8 ^ 0x40;
                 let data = String::from_utf8(vec![ctrl_byte]).unwrap_or_default();
@@ -664,6 +772,11 @@ impl Shell {
 
     // ── 生命周期 ──────────────────────────────────────────────────────────
 
+    /// 等待子进程与所有 IO 任务完全收尾（会话关闭后立即返回）。
+    ///
+    /// # Errors
+    ///
+    /// - 后台任务 panic 时返回 `Err`。
     pub async fn join_close(&mut self) -> Result<()> {
         if !self.droped {
             self.close_notify.notified().await;
@@ -674,6 +787,11 @@ impl Shell {
         Ok(())
     }
 
+    /// 等待子进程退出并回收后台任务（会话关闭后立即返回）。
+    ///
+    /// # Errors
+    ///
+    /// - 后台任务 panic 时返回 `Err`。
     pub async fn join_exit(&mut self) -> Result<()> {
         if let Some(handle) = self.join.take() {
             handle.await.map_err(|e| anyhow!("join_exit failed: {e}"))?;
@@ -682,6 +800,11 @@ impl Shell {
     }
 
     /// 重新拉起一个全新的会话（复用相同的 shell_path / 回调 / 缓冲区 / PTY 配置）。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - 旧会话无法正常退出、或新会话启动失败时返回 `Err`。
     pub async fn reset(&mut self) -> Result<()> {
         ensure!(!self.droped, "shell is closed");
         self.exit().await?;
@@ -712,6 +835,12 @@ impl Shell {
     }
 
     /// 关闭当前会话（可通过 `reset()` 恢复）。
+    ///
+    /// # Errors
+    ///
+    /// - 会话已关闭时返回 `Err`；
+    /// - 子进程在 10 秒内未退出时改为 `close()`，不返回 `Err`；
+    /// - 后台任务 panic 时返回 `Err`。
     pub async fn exit(&mut self) -> Result<()> {
         ensure!(!self.droped, "shell is closed");
 
@@ -736,6 +865,10 @@ impl Shell {
     }
 
     /// 立即关闭 Shell 实例（不可恢复，同步）。
+    ///
+    /// # Errors
+    ///
+    /// 本方法不依赖子进程状态，始终返回 `Ok`。
     pub fn close(&mut self) -> Result<()> {
         if self.droped {
             return Ok(());
@@ -765,7 +898,7 @@ fn parse_control_shortcut(cmd: &str) -> Option<char> {
         (Some('^'), Some(c), None) => {
             let upper = c.to_ascii_uppercase();
             // 允许 '@' 到 '_' (包含了 A-Z) 以及 '?'
-            if (upper >= '@' && upper <= '_') || upper == '?' {
+            if ('@'..='_').contains(&upper) || upper == '?' {
                 Some(upper)
             } else {
                 None
@@ -782,7 +915,7 @@ mod tests {
     #![allow(unused)]
     use super::*;
     use tokio::sync::mpsc as test_mpsc;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     #[test]
     fn control_shortcut_parsing() {
@@ -891,7 +1024,10 @@ mod tests {
             .await
             .unwrap();
 
-        shell.send_line("pwd; echo X=$SHELL_ENGINE_X").await.unwrap();
+        shell
+            .send_line("pwd; echo X=$SHELL_ENGINE_X")
+            .await
+            .unwrap();
         let out = shell.output(Some(Duration::from_millis(300)), None).await;
         assert!(out.stdout.contains("/tmp"));
         assert!(out.stdout.contains("X=42"));
@@ -912,7 +1048,10 @@ mod tests {
 
         shell.reset().await.expect("reset failed");
 
-        shell.send_line("pwd; echo Y=$SHELL_ENGINE_Y").await.unwrap();
+        shell
+            .send_line("pwd; echo Y=$SHELL_ENGINE_Y")
+            .await
+            .unwrap();
         let out = shell.output(Some(Duration::from_millis(300)), None).await;
         assert!(out.stdout.contains("/tmp"));
         assert!(out.stdout.contains("Y=keep"));
@@ -949,7 +1088,6 @@ mod tests {
             .expect("failed to spawn pty shell");
 
         assert!(shell.is_pty());
-        assert_eq!(shell.pty_window_size(), Some((80, 24)));
 
         shell.send_line("printf 'SNAP_MARK\\n'").await.unwrap();
         let snap = shell

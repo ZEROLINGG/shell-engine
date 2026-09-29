@@ -1,6 +1,64 @@
 # shell-engine
 
+> **Languages:** [English](README.md) | [简体中文](README-zh_CN.md)
+
 A persistent, long-lived shell session manager for async Rust. Spawn a shell once, then interact with it across multiple commands — state, environment variables, and working directory persist.
+
+```rust
+use shell_engine::Shell;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let mut sh = Shell::new("bash")
+        .enable_buffer()
+        .spawn()
+        .await?;
+
+    sh.send_line("export FOO=bar").await?;
+    sh.send_line("echo $FOO").await?;
+    let out = sh.output(None, None).await;
+    assert_eq!(out.stdout.trim(), "bar");
+    sh.exit().await?;
+    Ok(())
+}
+```
+
+## Table of Contents
+
+- [Design Philosophy](#design-philosophy)
+- [Quick Start](#quick-start)
+- [When to use / When not to use](#when-to-use--when-not-to-use)
+- [Feature Flags](#feature-flags)
+- [Platform & Environment Support](#platform--environment-support)
+- [Minimum Supported Rust Version](#minimum-supported-rust-version-msrv)
+- [Contributing](#contributing)
+- [Changelog](#changelog)
+- [License](#license)
+
+## Design Philosophy
+
+1. **Single session entry, no duplicated logic** — Pipe mode and PTY mode share the same `backend::launch()` startup and the same `OutputPump` decode+dispatch state machine (`stream.rs`), avoiding two copies of read logic that tend to drift apart.
+2. **Explicit over implicit** — Buffering, callback granularity, and PTY toggle are all controlled explicitly via the `ShellBuilder` chain; no magic defaults.
+3. **Minimal dependencies** — Runtime deps are only `anyhow`, `tokio`, `serde`; PTY-related deps (`rust-pty`, `vt100`) are isolated as optional features.
+
+### Trade-offs
+
+| We chose | Instead of | Why |
+|---|---|---|
+| Bounded output buffer (drop oldest on overflow) | Unbounded accumulation | Long-running sessions have a memory cap, with `truncated_bytes` stats |
+| Optional PTY (feature-gated) | Dual-backend always loaded | `vt100`/`rust-pty` are heavy; pure-pipe users shouldn't pay for them |
+| PTY mode merges stdout/stderr | Splitting into two streams | Pseudoterminals naturally merge; splitting needs an extra parse layer for little gain |
+
+## Quick Start
+
+Add the dependency to your `Cargo.toml`:
+
+```toml
+[dependencies]
+shell-engine = "0.2"
+```
+
+Basic usage:
 
 ```rust
 use shell_engine::Shell;
@@ -41,6 +99,18 @@ Any shell or console program that communicates via standard input/output is supp
 
 Anything else — nushell, elvish, xonsh, irb, sqlite3, custom REPLs, etc. — can also be spawned: unknown executables are launched with zero arguments and no built-in init/exit input (`exit()` then relies on closing stdin / EOF). Use `args`, `init_input`, `exit_input`, `work_dir`, and `env` on the builder to configure them as needed.
 
+## When to use / When not to use
+
+**Use it when:**
+- Automation scripts need session state (env vars, working dir, internal shell state) across multiple commands
+- Driving interactive REPLs / terminal programs (editors, `htop`) that need a real pseudoterminal (`enable_pty()`)
+- You need real-time callbacks, line-level parsing, or bounded buffering on subprocess output
+
+**Do NOT use it when:**
+- A few fire-and-forget commands suffice — use `exec()` instead (new process each call, no session)
+- You need strict stdout/stderr separation in PTY mode (PTY merges the two; `on_error` won't fire)
+- You need process clusters / distributed task orchestration — this crate manages a single local session
+
 ## Installation
 
 ```toml
@@ -49,6 +119,20 @@ shell-engine = "0.2"
 ```
 
 PTY support (via `rust-pty` + `vt100`) is enabled by default. To disable it:
+
+```toml
+[dependencies]
+shell-engine = { version = "0.2", default-features = false }
+```
+
+## Feature Flags
+
+This crate supports the following [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html):
+
+- `default`: enabled by default; equivalent to `pty` (PTY backend + `vt100` screen snapshots).
+- `pty`: enables the pseudoterminal backend and the `rust-pty` / `vt100` optional deps. When disabled, only pipe mode remains; PTY-only APIs (`enable_pty`, `output_snapshot`, `resize`, etc.) are excluded from compilation.
+
+Pipe-only setup:
 
 ```toml
 [dependencies]
@@ -268,9 +352,9 @@ All key types are re-exported at the crate root: `use shell_engine::{Shell, Shel
 | `shell_engine::bash()` | unix | Global singleton bash `Arc<Mutex<Shell>>` |
 | `shell_engine::powershell()` | windows | Global singleton powershell `Arc<Mutex<Shell>>` |
 
-### `util` module
+### `tool` module
 
-Low-level helpers: `StreamDecoder` (incremental text decoder), `decode_bytes`, `detect_encoding`.
+Low-level helpers: `StreamDecoder` (incremental text decoder), `decode_bytes`, `detect_encoding`, `normalize_shell_name`, `strip_ansi_codes`.
 
 ### `exec` module
 
@@ -278,6 +362,30 @@ Low-level helpers: `StreamDecoder` (incremental text decoder), `decode_bytes`, `
 |------|-------------|
 | `exec()` | Run a one-shot command with optional timeout |
 | `ExecResult` | Result with `stdout`, `stderr`, `exit_code`, `ok()`, `success()`, `failed()` |
+
+## Platform & Environment Support
+
+- Supported OSes: Linux, macOS, Windows (Windows provides built-in `powershell` defaults and automatic code-page detection)
+- `no_std` support: no (depends on the `tokio` async runtime)
+- Unsafe code: only `tool::detect_encoding` on Windows calls `GetConsoleOutputCP`; the `rust-pty` dependency contains FFI internally
+
+## Minimum Supported Rust Version (MSRV)
+
+`Cargo.toml` uses `edition = "2024"`, which requires **Rust 1.85 or newer**; the project does not declare `rust-version` explicitly.
+
+MSRV policy: evolves with Rust releases; raised only on minor version bumps and documented in the CHANGELOG.
+
+## Contributing
+
+Issues and Pull Requests are welcome!
+
+- Local dev setup: `cargo build && cargo test` (PTY tests require a Unix environment).
+- Please read the [Design Philosophy](#design-philosophy) before opening a PR; feature requests that conflict with the core principles may not be accepted (feel free to discuss in an Issue first).
+- Follow the Conventional Commits format for commit messages (`feat` / `fix` / `docs` / `refactor`, etc.).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## License
 

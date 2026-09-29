@@ -1,14 +1,15 @@
-use std::borrow::Cow;
-use std::time::Duration;
-use std::process::Stdio;
-use anyhow::{anyhow, bail, ensure, Result};
-use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 use crate::tool::{decode_bytes, normalize_shell_name};
+use anyhow::{Result, anyhow, bail, ensure};
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::process::Stdio;
+use std::time::Duration;
+use tokio::process::Command;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// 一次一次性执行（`exec`）的结果：标准输出、标准错误与退出码。
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ExecResult {
     pub stdout: String,
@@ -17,16 +18,40 @@ pub struct ExecResult {
 }
 
 impl ExecResult {
+    /// 若退出码为 0，返回 `stdout`；否则返回 `Err(stderr)`。
+    ///
+    /// # Errors
+    ///
+    /// 当 `exit_code != 0` 时返回以 `stderr` 为消息的 `Err`。
     pub fn ok(self) -> Result<String> {
-        if self.exit_code == 0 { return Ok(self.stdout) }
+        if self.exit_code == 0 {
+            return Ok(self.stdout);
+        }
         bail!(self.stderr)
     }
 
-    pub fn success(&self) -> bool { self.exit_code == 0 }
+    /// 退出码是否为 0。
+    pub fn success(&self) -> bool {
+        self.exit_code == 0
+    }
 
-    pub fn failed(&self) -> bool { !self.success() }
+    /// 退出码是否非 0。
+    pub fn failed(&self) -> bool {
+        !self.success()
+    }
 }
 
+/// 一次性执行一条命令并等待其结束（非持久会话）。
+///
+/// 与 `Shell` 不同，此函数适合"跑完即弃"的场景：每次调用都会
+/// 启动一个新的子进程，完成后直接返回结果，不保留任何会话状态。
+///
+/// # Errors
+///
+/// - 当 `shell` 为空字符串或无法从路径解析出 shell 名称时返回 `Err`；
+/// - 当 `shell` 名称不受支持（不在内置清单内）时返回 `Err`；
+/// - 当子进程启动失败时返回 `Err`；
+/// - 当设置了 `timeout_dur` 且命令在超时前未结束时返回 `Err`。
 pub async fn exec<'a>(
     input: impl Into<Cow<'a, str>>,
     shell: impl Into<Cow<'a, str>>,
@@ -36,10 +61,10 @@ pub async fn exec<'a>(
     let shell = shell.trim();
     ensure!(!shell.is_empty(), "shell path cannot be empty");
 
-    let shell_name = normalize_shell_name(&shell)?;
+    let shell_name = normalize_shell_name(shell)?;
     let input_ref = input.into();
 
-    let mut cmd = build_exec_command(&shell, &shell_name, input_ref.as_ref())?;
+    let mut cmd = build_exec_command(shell, &shell_name, input_ref.as_ref())?;
 
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())

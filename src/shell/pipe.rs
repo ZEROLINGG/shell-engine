@@ -14,12 +14,18 @@ use tokio::task::JoinHandle;
 use crate::shell::buffer::OutputBuffer;
 use crate::shell::callbacks::CallbackHub;
 use crate::shell::profile::ShellProfile;
-use crate::shell::stream::{read_stream, StdinMsg};
+use crate::shell::stream::{StdinMsg, read_stream};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// 启动管道模式子进程，返回驱动交互所需的句柄。
+///
+/// # Panics
+///
+/// 仅在 `cmd.spawn()` 成功之后才会对 `stdin`/`stdout`/`stderr` 执行
+/// `.take().unwrap()`：spawn 成功即代表三个管道均成功创建，这些 `unwrap`
+/// 不会触发 panic。
 pub(crate) async fn spawn_process(
     profile: &ShellProfile,
     callbacks: CallbackHub,
@@ -88,14 +94,12 @@ pub(crate) async fn spawn_process(
                     if let Some(mut stdin) = stdin_opt.take() {
                         const STDIN_TIMEOUT: Duration = Duration::from_secs(30);
 
-                        let write_ok = tokio::time::timeout(
-                            STDIN_TIMEOUT,
-                            stdin.write_all(data.as_bytes()),
-                        )
-                            .await
-                            .ok()
-                            .and_then(|r| r.ok())
-                            .is_some();
+                        let write_ok =
+                            tokio::time::timeout(STDIN_TIMEOUT, stdin.write_all(data.as_bytes()))
+                                .await
+                                .ok()
+                                .and_then(|r| r.ok())
+                                .is_some();
                         if !write_ok {
                             break; // 确实是管道已断，直接放弃
                         }

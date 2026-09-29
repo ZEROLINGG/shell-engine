@@ -1,8 +1,8 @@
 //! 有界输出缓冲区：超出容量后自动丢弃最旧的数据块。
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::sync::{Mutex, Notify};
 
@@ -20,6 +20,7 @@ pub struct OutputBuffer {
 }
 
 impl OutputBuffer {
+    /// 新建一个容量上限为 `max_bytes` 字节的有界缓冲区。
     pub fn new(max_bytes: usize) -> Self {
         Self {
             inner: Mutex::new(OutputBufferInner {
@@ -66,6 +67,7 @@ impl OutputBuffer {
         s
     }
 
+    /// 缓冲区当前是否为空。
     pub async fn is_empty(&self) -> bool {
         self.inner.lock().await.chunks.is_empty()
     }
@@ -74,7 +76,7 @@ impl OutputBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::{sleep, timeout, Duration};
+    use tokio::time::{Duration, sleep, timeout};
 
     #[tokio::test]
     async fn basic_push_take() {

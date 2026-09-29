@@ -4,9 +4,10 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use tokio::sync::Notify;
 
+use crate::shell::Shell;
 use crate::shell::backend::LaunchConfig;
 #[cfg(feature = "pty")]
 use crate::shell::backend::PtyOptions;
@@ -16,10 +17,13 @@ use crate::shell::callbacks::{
     AsyncPreSendCallback, CallbackHub, CallbackMode, Callbacks, PreSendHook,
 };
 use crate::shell::profile::ShellProfile;
-use crate::shell::Shell;
 
 const DEFAULT_BUFFER_CAPACITY: usize = 1024 * 1024;
 
+/// 链式配置持久 shell 会话的构建器。
+///
+/// 通过 [`Shell::new`](crate::shell::Shell::new) 或 [`ShellBuilder::new`]
+/// 创建，随后链式调用各配置项，最后以 [`spawn`](ShellBuilder::spawn) 启动。
 pub struct ShellBuilder {
     shell_path: String,
     pre_send: Option<AsyncPreSendCallback>,
@@ -39,6 +43,7 @@ pub struct ShellBuilder {
 }
 
 impl ShellBuilder {
+    /// 新建一个构建器，指定要启动的 shell（可传路径，如 `/bin/zsh`）。
     pub fn new(shell: impl Into<String>) -> Self {
         Self {
             shell_path: shell.into(),
@@ -93,7 +98,9 @@ impl ShellBuilder {
 
     /// 追加一个子进程环境变量（在父进程环境之上叠加）。
     pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.envs.get_or_insert_with(Vec::new).push((key.into(), value.into()));
+        self.envs
+            .get_or_insert_with(Vec::new)
+            .push((key.into(), value.into()));
         self
     }
 
@@ -185,6 +192,8 @@ impl ShellBuilder {
 
     // ── 回调注册 ──────────────────────────────────────────────────────────
 
+    /// 注册发送前拦截钩子：每次 `Shell::send` 发送内容前调用，返回 `Some(新内容)`
+    /// 表示放行（可改写），返回 `None` 表示拦截该次发送。
     pub fn on_send<F, Fut>(mut self, mut f: F) -> Self
     where
         F: FnMut(String) -> Fut + Send + 'static,
@@ -195,6 +204,7 @@ impl ShellBuilder {
         self
     }
 
+    /// 注册标准输出回调：输出到达时触发，回调内容为解码后的文本。
     pub fn on_output<F, Fut>(mut self, mut f: F) -> Self
     where
         F: FnMut(String) -> Fut + Send + 'static,
@@ -216,6 +226,7 @@ impl ShellBuilder {
         self
     }
 
+    /// 注册退出回调：子进程退出时触发，参数为退出码（`None` 表示无法获取）。
     pub fn on_exit<F, Fut>(mut self, mut f: F) -> Self
     where
         F: FnMut(Option<i32>) -> Fut + Send + 'static,
@@ -226,6 +237,7 @@ impl ShellBuilder {
         self
     }
 
+    /// 注册关闭回调：会话完全关闭（子进程退出、IO 任务收尾完成）后触发。
     pub fn on_close<F, Fut>(mut self, mut f: F) -> Self
     where
         F: FnMut() -> Fut + Send + 'static,
@@ -238,6 +250,12 @@ impl ShellBuilder {
 
     // ── spawn ─────────────────────────────────────────────────────────────
 
+    /// 按照当前配置启动会话，返回可交互的 [`Shell`] 实例。
+    ///
+    /// # Errors
+    ///
+    /// - 当 shell 路径为空或无法解析出名称时返回 `Err`；
+    /// - 当底层子进程启动失败时返回 `Err`。
     pub async fn spawn(self) -> Result<Shell> {
         let shell_path = self.shell_path.trim().to_string();
         ensure!(!shell_path.is_empty(), "shell path cannot be empty");

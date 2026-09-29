@@ -2,11 +2,19 @@
 name = "shell-engine"
 version = "0.2.4"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT"
+readme = "README.md"
 description = "An async shell runtime for persistent sessions, PTY I/O, output buffering, real-time callbacks, and screen snapshots."
 repository = "https://github.com/ZEROLINGG/shell-engine"
 documentation = "https://docs.rs/shell-engine"
 homepage = "https://github.com/ZEROLINGG"
+keywords = ["shell", "async", "pty", "subprocess", "terminal"]
+categories = ["asynchronous", "command-line-interface"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 anyhow = "1"
