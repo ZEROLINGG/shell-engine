@@ -1,19 +1,19 @@
 # shell-engine
 > **A persistent, long-lived shell session manager for async Rust.**
 
-<!-- ============ 徽章区 ============ -->
-<!-- 第一行：核心发布信息 -->
 [![Crates.io](https://img.shields.io/crates/v/shell-engine.svg)](https://crates.io/crates/shell-engine)
 [![Downloads](https://img.shields.io/crates/d/shell-engine.svg)](https://crates.io/crates/shell-engine)
 [![Documentation](https://docs.rs/shell-engine/badge.svg)](https://docs.rs/shell-engine)
 [![License](https://img.shields.io/crates/l/shell-engine.svg)](#license)
 
-<!-- 第二行：工程状态信息 -->
+[![CI](https://github.com/ZEROLINGG/shell-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/ZEROLINGG/shell-engine/actions)
 [![MSRV](https://img.shields.io/badge/MSRV-1.85-blue.svg)](#minimum-supported-rust-version-msrv)
-<!-- CI badge：尚未配置 .github/workflows/ci.yml，配置后取消注释 -->
-<!-- [![CI](https://github.com/ZEROLINGG/shell-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/ZEROLINGG/shell-engine/actions) -->
 
 **Languages:** [English](README.md) | [简体中文](README-zh_CN.md)
+
+Managing a shell process as a reusable, stateful session is fiddly: you spawn once, then fight with buffering, PTY handling, and incremental output decoding by hand. **shell-engine** wraps that entire lifecycle in one async API — you spawn a persistent shell, run many commands against the same stateful process, switch between clean pipe I/O and a real pseudoterminal via a single builder flag, and consume output through bounded buffers or real-time line/raw callbacks.
+
+It is designed for automation tooling, interactive REPL/terminal drivers, and any harness that needs a long-lived child shell with predictable output handling — one spawn, many commands, cross-platform, and shell-agnostic.
 
 
 ---

@@ -1,20 +1,19 @@
 # shell-engine
 > **一个面向异步 Rust 的持久化、长生命周期 shell 会话管理器。**
 
-
-<!-- ============ 徽章区 ============ -->
-<!-- 第一行：核心发布信息 -->
 [![Crates.io](https://img.shields.io/crates/v/shell-engine.svg)](https://crates.io/crates/shell-engine)
 [![Downloads](https://img.shields.io/crates/d/shell-engine.svg)](https://crates.io/crates/shell-engine)
 [![Documentation](https://docs.rs/shell-engine/badge.svg)](https://docs.rs/shell-engine)
 [![License](https://img.shields.io/crates/l/shell-engine.svg)](#开源协议-license)
 
-<!-- 第二行：工程状态信息 -->
+[![CI](https://github.com/ZEROLINGG/shell-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/ZEROLINGG/shell-engine/actions)
 [![MSRV](https://img.shields.io/badge/MSRV-1.85-blue.svg)](#最小-rust-版本-msrv)
-<!-- CI badge：尚未配置 .github/workflows/ci.yml，配置后取消注释 -->
-<!-- [![CI](https://github.com/ZEROLINGG/shell-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/ZEROLINGG/shell-engine/actions) -->
 
 **语言：** [English](README.md) | [简体中文](README-zh_CN.md)
+
+把 shell 进程管理成可复用的、有状态的会话是一件麻烦事：你 spawn 一次之后，还要手工处理缓冲、PTY 与增量输出解码，苦不堪言。**shell-engine** 用一套异步 API 封装了完整的生命周期——拉起一个持久 shell，对同一个有状态进程连续执行多条命令，通过一个 builder 开关在干净的管道 I/O 与真实伪终端之间切换，并用有界缓冲或实时行/块回调来消费输出。
+
+它面向自动化工具、交互式 REPL/终端驱动以及任何需要长生命周期子进程且输出可预期的 harness 场景——一次 spawn、多次命令、跨平台、不绑定具体 shell。
 
 
 ---
