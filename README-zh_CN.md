@@ -1,39 +1,42 @@
 # shell-engine
+> **一个面向异步 Rust 的持久化、长生命周期 shell 会话管理器。**
 
-> **语言：** [English](README.md) | [简体中文](README-zh_CN.md)
 
-一个面向异步 Rust 的持久化、长生命周期 shell 会话管理器。只需 spawn 一次 shell，即可跨多条命令与其交互——状态、环境变量与工作目录会持续保留。
+<!-- ============ 徽章区 ============ -->
+<!-- 第一行：核心发布信息 -->
+[![Crates.io](https://img.shields.io/crates/v/shell-engine.svg)](https://crates.io/crates/shell-engine)
+[![Downloads](https://img.shields.io/crates/d/shell-engine.svg)](https://crates.io/crates/shell-engine)
+[![Documentation](https://docs.rs/shell-engine/badge.svg)](https://docs.rs/shell-engine)
+[![License](https://img.shields.io/crates/l/shell-engine.svg)](#开源协议-license)
 
-```rust
-use shell_engine::Shell;
+<!-- 第二行：工程状态信息 -->
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue.svg)](#最小-rust-版本-msrv)
+<!-- CI badge：尚未配置 .github/workflows/ci.yml，配置后取消注释 -->
+<!-- [![CI](https://github.com/ZEROLINGG/shell-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/ZEROLINGG/shell-engine/actions) -->
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let mut sh = Shell::new("bash")
-        .enable_buffer()
-        .spawn()
-        .await?;
+**语言：** [English](README.md) | [简体中文](README-zh_CN.md)
 
-    sh.send_line("export FOO=bar").await?;
-    sh.send_line("echo $FOO").await?;
-    let out = sh.output(None, None).await;
-    assert_eq!(out.stdout.trim(), "bar");
-    sh.exit().await?;
-    Ok(())
-}
-```
+
+---
 
 ## 目录
 
 - [设计哲学](#设计哲学)
 - [快速开始](#快速开始-quick-start)
+- [API 总览](#api-总览)
+- [功能特性](#功能特性)
+- [支持的 Shell](#支持的-shell)
 - [适用场景 vs 不适用场景](#适用场景-vs-不适用场景)
+- [安装](#安装)
 - [特性标志](#特性标志-feature-flags)
+- [用法](#用法)
 - [平台与环境支持](#平台与环境支持)
 - [最小 Rust 版本](#最小-rust-版本-msrv)
+- [安全性](#安全性)
 - [贡献](#贡献-contributing)
 - [变更日志](#变更日志)
 - [开源协议](#开源协议-license)
+- [致谢](#致谢)
 
 ## 设计哲学
 
@@ -49,6 +52,12 @@ async fn main() -> anyhow::Result<()> {
 | 可选 PTY（feature 隔离） | 默认双后端常驻 | `vt100`/`rust-pty` 依赖较重，纯管道场景不应背负 |
 | PTY 模式 stdout/stderr 合并 | 拆分为两路 | 伪终端天然合并，拆分需要额外解析层，收益有限 |
 
+### 非目标
+
+- **不做进程集群/编排框架** —— 本库只管理单个本机会话，不涉分布式任务池或远程 SSH 集群
+- **不做 PTY 级别的 stdout/stderr 分离** —— 伪终端天然合并两路流，我们不额外加解析层拆分
+- **不做 shell 解析器 / AST 库** —— 输出以原始文本交付（可选剥离 ANSI）；结构化解析交给调用方
+
 ## 快速开始 (Quick Start)
 
 将依赖加入你的 `Cargo.toml`：
@@ -63,7 +72,7 @@ shell-engine = "0.2"
 ```rust
 use shell_engine::Shell;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let mut sh = Shell::new("bash")
         .enable_buffer()
@@ -78,6 +87,61 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 ```
+
+## API 总览
+
+所有核心类型都在 crate 根重导出：`use shell_engine::{Shell, ShellBuilder, ShellOutput, OutputBuffer, CallbackMode};`
+
+### `shell` 模块
+
+| 类型 | 描述 |
+|------|-------------|
+| `Shell` | 持久化 shell 进程的活动句柄 |
+| `ShellBuilder` | 配置并 spawn `Shell` 的链式 builder |
+| `ShellOutput` | 包含 `stdout` 与 `stderr` 字段的结果结构体；提供 `is_empty()` |
+| `OutputBuffer` | 有界、异步并发的输出累加器 |
+| `CallbackMode` | `Raw`（按块）或 `Line`（按行）回调模式 |
+
+**`Shell` 生命周期方法：** `send`（自动识别 `"^C"` 语法，转走 `send_control_char`）、`send_line`、`send_keys`（发送 `Key::SpecialKey`/`Key::Char` 序列，如方向键、F1–F12）、`send_control_char`（PTY：完整 `^A`–`^_` + `^?`；管道：`^R` 重置、`^D` EOF）、`send_eof`、`reset`、`exit`、`close`、`join_close`、`join_exit`
+
+**`Shell` 输出方法：** `output(idle, max_wait)`、`output_until(substring, timeout)`
+
+**`Shell` 统计：** `output_truncated_bytes`、`error_truncated_bytes`（PTY 模式下恒为 0）
+
+**`Shell` PTY 方法（需要 `pty` feature）：** `output_snapshot`、`screen_clone`、`resize`、`is_pty`、`pty_window_size`、`send_signal`、`cursor_position`、`move_cursor_to`
+
+**`ShellBuilder` 配置：** `enable_buffer`、`enable_buffer_with_capacity`、`line_callback`、`raw_callback`
+
+**`ShellBuilder` 进程配置：** `work_dir`、`env`、`envs`、`args`、`init_input`、`exit_input`（覆盖各 shell 内置默认值；`reset()` 后保留；未知 shell 以零参数启动）
+
+**`ShellBuilder` PTY 配置（需要 `pty` feature）：** `enable_pty`、`pty_size`、`scrollback`、`disable_snapshot`（节省 CPU/内存；`output_snapshot`/`screen_clone`/`cursor_position` 将报错）
+
+**`ShellBuilder` 钩子：** `on_output`、`on_error`、`on_exit`、`on_close`、`on_send`
+
+**`OutputBuffer` 方法：** `new`、`push`、`take`、`is_empty`
+
+**`OutputBuffer` 公开字段：** `notify`（新数据唤醒器）、`truncated_bytes`（溢出计数器）
+
+### Crate 根重导出
+
+| 重导出 | Feature 门控 | 描述 |
+|-----------|-------------|-------------|
+| `shell_engine::vt100` | `pty` | 重导出，方便直接用 `shell_engine::vt100::Screen` 而无需自行加依赖 |
+| `shell_engine::PtySignal` | `pty` | `send_signal()` 的信号类型 |
+| `shell_engine::WindowSize` | `pty` | PTY 窗口尺寸结构体 |
+| `shell_engine::bash()` | unix | 全局单例 bash `Arc<Mutex<Shell>>` |
+| `shell_engine::powershell()` | windows | 全局单例 powershell `Arc<Mutex<Shell>>` |
+
+### `tool` 模块
+
+底层辅助：`StreamDecoder`（增量文本解码器）、`decode_bytes`、`detect_encoding`、`normalize_shell_name`、`strip_ansi_codes`。
+
+### `exec` 模块
+
+| 类型 | 描述 |
+|------|-------------|
+| `exec()` | 运行一次性命令（可选超时） |
+| `ExecResult` | 含 `stdout`、`stderr`、`exit_code`、`ok()`、`success()`、`failed()` 的结果 |
 
 ## 功能特性
 
@@ -309,61 +373,6 @@ let content = buf.take().await;
 let lost = buf.truncated_bytes.load(std::sync::atomic::Ordering::Relaxed);
 ```
 
-## API 总览
-
-所有核心类型都在 crate 根重导出：`use shell_engine::{Shell, ShellBuilder, ShellOutput, OutputBuffer, CallbackMode};`
-
-### `shell` 模块
-
-| 类型 | 描述 |
-|------|-------------|
-| `Shell` | 持久化 shell 进程的活动句柄 |
-| `ShellBuilder` | 配置并 spawn `Shell` 的链式 builder |
-| `ShellOutput` | 包含 `stdout` 与 `stderr` 字段的结果结构体；提供 `is_empty()` |
-| `OutputBuffer` | 有界、异步并发的输出累加器 |
-| `CallbackMode` | `Raw`（按块）或 `Line`（按行）回调模式 |
-
-**`Shell` 生命周期方法：** `send`（自动识别 `"^C"` 语法，转走 `send_control_char`）、`send_line`、`send_keys`（发送 `Key::SpecialKey`/`Key::Char` 序列，如方向键、F1–F12）、`send_control_char`（PTY：完整 `^A`–`^_` + `^?`；管道：`^R` 重置、`^D` EOF）、`send_eof`、`reset`、`exit`、`close`、`join_close`、`join_exit`
-
-**`Shell` 输出方法：** `output(idle, max_wait)`、`output_until(substring, timeout)`
-
-**`Shell` 统计：** `output_truncated_bytes`、`error_truncated_bytes`（PTY 模式下恒为 0）
-
-**`Shell` PTY 方法（需要 `pty` feature）：** `output_snapshot`、`screen_clone`、`resize`、`is_pty`、`pty_window_size`、`send_signal`、`cursor_position`、`move_cursor_to`
-
-**`ShellBuilder` 配置：** `enable_buffer`、`enable_buffer_with_capacity`、`line_callback`、`raw_callback`
-
-**`ShellBuilder` 进程配置：** `work_dir`、`env`、`envs`、`args`、`init_input`、`exit_input`（覆盖各 shell 内置默认值；`reset()` 后保留；未知 shell 以零参数启动）
-
-**`ShellBuilder` PTY 配置（需要 `pty` feature）：** `enable_pty`、`pty_size`、`scrollback`、`disable_snapshot`（节省 CPU/内存；`output_snapshot`/`screen_clone`/`cursor_position` 将报错）
-
-**`ShellBuilder` 钩子：** `on_output`、`on_error`、`on_exit`、`on_close`、`on_send`
-
-**`OutputBuffer` 方法：** `new`、`push`、`take`、`is_empty`
-
-**`OutputBuffer` 公开字段：** `notify`（新数据唤醒器）、`truncated_bytes`（溢出计数器）
-
-### Crate 根重导出
-
-| 重导出 | Feature 门控 | 描述 |
-|-----------|-------------|-------------|
-| `shell_engine::vt100` | `pty` | 重导出，方便直接用 `shell_engine::vt100::Screen` 而无需自行加依赖 |
-| `shell_engine::PtySignal` | `pty` | `send_signal()` 的信号类型 |
-| `shell_engine::WindowSize` | `pty` | PTY 窗口尺寸结构体 |
-| `shell_engine::bash()` | unix | 全局单例 bash `Arc<Mutex<Shell>>` |
-| `shell_engine::powershell()` | windows | 全局单例 powershell `Arc<Mutex<Shell>>` |
-
-### `tool` 模块
-
-底层辅助：`StreamDecoder`（增量文本解码器）、`decode_bytes`、`detect_encoding`、`normalize_shell_name`、`strip_ansi_codes`。
-
-### `exec` 模块
-
-| 类型 | 描述 |
-|------|-------------|
-| `exec()` | 运行一次性命令（可选超时） |
-| `ExecResult` | 含 `stdout`、`stderr`、`exit_code`、`ok()`、`success()`、`failed()` 的结果 |
-
 ## 平台与环境支持
 
 - 支持操作系统：Linux、macOS、Windows（Windows 下提供 `powershell` 内置默认值与代码页自动检测）
@@ -372,9 +381,13 @@ let lost = buf.truncated_bytes.load(std::sync::atomic::Ordering::Relaxed);
 
 ## 最小 Rust 版本 (MSRV)
 
-`Cargo.toml` 使用 `edition = "2024"`，要求 **Rust 1.85 及以上**；项目未显式声明 `rust-version`。
+`Cargo.toml` 已声明 `edition = "2024"` 与 `rust-version = "1.85"`，因此最低支持 Rust 版本为 **1.85**。
 
 MSRV 变更策略：随 Rust 版本演进，仅会在 minor 版本升级时调整，并在 CHANGELOG 中说明。
+
+## 安全性
+
+如发现安全漏洞，请勿直接提交公开 Issue，而是私下联系维护者上报。如有条件请附上最小复现步骤。
 
 ## 贡献 (Contributing)
 
@@ -391,3 +404,9 @@ MSRV 变更策略：随 Rust 版本演进，仅会在 minor 版本升级时调�
 ## 开源协议 (License)
 
 MIT © 2026
+
+## 致谢
+
+- [rust-pty](https://crates.io/crates/rust-pty) —— 跨平台 PTY 接口，驱动 `pty` feature
+- [vt100](https://crates.io/crates/vt100) —— 终端状态机，实现屏幕快照
+- [tokio](https://crates.io/crates/tokio) —— 本库所基于的异步运行时
