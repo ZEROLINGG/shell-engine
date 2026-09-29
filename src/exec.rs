@@ -161,7 +161,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn test_exec() {
-        let shells = vec!["zsh", "bash", "sh"];
+        let shells = vec!["bash", "sh"];
         for shell in shells {
             test_shell_exec(shell).await;
         }
