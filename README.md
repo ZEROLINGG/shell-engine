@@ -25,7 +25,7 @@
 - [API Overview](#api-overview)
 - [Features](#features)
 - [Supported Shells](#supported-shells)
-- [When to use / When not to use](#when-to-use--when-not-to-use)
+- [When to use](#when-to-use)
 - [Installation](#installation)
 - [Feature Flags](#feature-flags)
 - [Usage](#usage)
@@ -51,11 +51,6 @@
 | Optional PTY (feature-gated) | Dual-backend always loaded | `vt100`/`rust-pty` are heavy; pure-pipe users shouldn't pay for them |
 | PTY mode merges stdout/stderr | Splitting into two streams | Pseudoterminals naturally merge; splitting needs an extra parse layer for little gain |
 
-### Non-Goals
-
-- **Not a process cluster / orchestration framework** — this crate manages a single local session, not distributed task pools or remote SSH fleets
-- **Not a PTY-level stdout/stderr separator** — pseudoterminals inherently merge the two streams; we do not add a parse layer to split them back
-- **Not a shell parser / AST library** — output is delivered as raw text (with optional ANSI stripping); structured parsing is left to the caller
 
 ## Quick Start
 
@@ -162,17 +157,12 @@ Any shell or console program that communicates via standard input/output is supp
 
 Anything else — nushell, elvish, xonsh, irb, sqlite3, custom REPLs, etc. — can also be spawned: unknown executables are launched with zero arguments and no built-in init/exit input (`exit()` then relies on closing stdin / EOF). Use `args`, `init_input`, `exit_input`, `work_dir`, and `env` on the builder to configure them as needed.
 
-## When to use / When not to use
+## When to use
 
 **Use it when:**
 - Automation scripts need session state (env vars, working dir, internal shell state) across multiple commands
 - Driving interactive REPLs / terminal programs (editors, `htop`) that need a real pseudoterminal (`enable_pty()`)
 - You need real-time callbacks, line-level parsing, or bounded buffering on subprocess output
-
-**Do NOT use it when:**
-- A few fire-and-forget commands suffice — use `exec()` instead (new process each call, no session)
-- You need strict stdout/stderr separation in PTY mode (PTY merges the two; `on_error` won't fire)
-- You need process clusters / distributed task orchestration — this crate manages a single local session
 
 ## Installation
 
